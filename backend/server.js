@@ -26,6 +26,8 @@ app.use(
     origin: (origin, callback) => {
       const allowedOrigins = [
         process.env.FRONTEND_URL || "http://localhost:3000",
+        "https://healiinn.vercel.app",
+        "https://www.healiinn.vercel.app",
         "https://healiinnx.vercel.app",
         "https://www.healiinnx.vercel.app",
       ];
@@ -66,6 +68,8 @@ app.use(
     const origin = req.headers.origin;
     const allowedOrigins = [
       process.env.FRONTEND_URL || "http://localhost:3000",
+      "https://healiinn.vercel.app",
+      "https://www.healiinn.vercel.app",
       "https://healiinnx.vercel.app",
       "https://www.healiinnx.vercel.app",
     ];

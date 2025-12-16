@@ -31,6 +31,8 @@ const initializeSocket = (server) => {
 
   // Add production domains if not already included
   const productionOrigins = [
+    'https://healiinn.vercel.app',
+    'https://www.healiinn.vercel.app',
     'https://healiinnx.vercel.app',
     'https://www.healiinnx.vercel.app',
   ];
