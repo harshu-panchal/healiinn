@@ -73,6 +73,10 @@ const AdminOrders = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [selectedProvider, setSelectedProvider] = useState(null) // Track selected provider to show orders
+  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPharmacyPage, setCurrentPharmacyPage] = useState(1)
+  const [currentLabPage, setCurrentLabPage] = useState(1)
+  const itemsPerPage = 10
 
   // Load orders from API
   useEffect(() => {
@@ -258,21 +262,6 @@ const AdminOrders = () => {
     return providers.sort((a, b) => b.revenue - a.revenue)
   }, [filteredOrders, typeFilter, searchTerm])
 
-  // Paginated provider aggregation
-  const paginatedProviderAggregation = useMemo(() => {
-    const startIndex = (currentProviderPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    return providerAggregation.slice(startIndex, endIndex)
-  }, [providerAggregation, currentProviderPage, itemsPerPage])
-
-  // Paginated selected provider orders
-  const paginatedSelectedProviderOrders = useMemo(() => {
-    if (!selectedProvider) return []
-    const startIndex = (currentPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    return selectedProviderOrders.slice(startIndex, endIndex)
-  }, [selectedProviderOrders, currentPage, itemsPerPage, selectedProvider])
-
   // Get orders for selected provider
   const selectedProviderOrders = useMemo(() => {
     if (!selectedProvider) return []
@@ -291,12 +280,32 @@ const AdminOrders = () => {
     return selectedProviderOrders.slice(startIndex, endIndex)
   }, [selectedProviderOrders, currentPage, itemsPerPage, selectedProvider])
 
-  // Paginated provider aggregation
-  const paginatedProviderAggregation = useMemo(() => {
-    const startIndex = (currentProviderPage - 1) * itemsPerPage
+  // Paginated pharmacy providers
+  const paginatedPharmacyProviders = useMemo(() => {
+    const pharmacyProviders = providerAggregation.filter(p => p.type === 'pharmacy')
+    const startIndex = (currentPharmacyPage - 1) * itemsPerPage
     const endIndex = startIndex + itemsPerPage
-    return providerAggregation.slice(startIndex, endIndex)
-  }, [providerAggregation, currentProviderPage, itemsPerPage])
+    return pharmacyProviders.slice(startIndex, endIndex)
+  }, [providerAggregation, currentPharmacyPage, itemsPerPage])
+
+  // Paginated lab providers
+  const paginatedLabProviders = useMemo(() => {
+    const labProviders = providerAggregation.filter(p => p.type === 'laboratory')
+    const startIndex = (currentLabPage - 1) * itemsPerPage
+    const endIndex = startIndex + itemsPerPage
+    return labProviders.slice(startIndex, endIndex)
+  }, [providerAggregation, currentLabPage, itemsPerPage])
+
+  // Pagination info for selected provider orders
+  const totalPages = useMemo(() => {
+    if (!selectedProvider) return 1
+    return Math.ceil(selectedProviderOrders.length / itemsPerPage)
+  }, [selectedProviderOrders, selectedProvider, itemsPerPage])
+
+  const totalItems = useMemo(() => {
+    if (!selectedProvider) return 0
+    return selectedProviderOrders.length
+  }, [selectedProviderOrders, selectedProvider])
 
   const getStatusColor = (status) => {
     switch (status) {
