@@ -190,7 +190,10 @@ const getOrCreateSession = async (doctorId, date) => {
       });
       
       // Always update session to match current doctor availability (force sync)
-      if (session.sessionStartTime !== availability.startTime || 
+      // Also update if sessionStartTime or sessionEndTime are missing (undefined/null)
+      if (!session.sessionStartTime || 
+          !session.sessionEndTime ||
+          session.sessionStartTime !== availability.startTime || 
           session.sessionEndTime !== availability.endTime ||
           session.maxTokens !== calculatedMaxTokens) {
         console.log(`🔄 Updating existing session for ${sessionDate.toISOString().split('T')[0]} (${dayName}):`, {
@@ -202,7 +205,9 @@ const getOrCreateSession = async (doctorId, date) => {
           newMaxTokens: calculatedMaxTokens,
           avgConsultationMinutes: avgConsultation,
           durationMinutes: duration,
-          reason: 'Doctor profile availability or consultation time changed',
+          reason: !session.sessionStartTime || !session.sessionEndTime 
+            ? 'Missing session times - updating from doctor availability'
+            : 'Doctor profile availability or consultation time changed',
         });
         
         session.sessionStartTime = availability.startTime;
@@ -221,6 +226,11 @@ const getOrCreateSession = async (doctorId, date) => {
       }
     } else {
       console.log(`⚠️ Session exists but no availability found for ${dayName}`);
+      // If session exists but has missing times, try to get availability from another source
+      // or at least log a warning
+      if (!session.sessionStartTime || !session.sessionEndTime) {
+        console.error(`❌ Session ${session._id} is missing sessionStartTime or sessionEndTime but no availability found for ${dayName}`);
+      }
     }
     return session;
   }
@@ -472,10 +482,14 @@ const checkSlotAvailability = async (doctorId, date) => {
     // This count includes all appointments with tokens: scheduled, confirmed, called, in-consultation, in_progress, waiting, completed
     const bookedSlots = actualBookedCount;
     
+    // Ensure maxTokens is a valid number (handle edge cases where it might be undefined/null)
+    const sessionMaxTokens = Number(session.maxTokens) || 0;
+    const effectiveMaxTokensValue = isSameDay && pastSlotsCount > 0 ? Number(effectiveMaxTokens) || 0 : sessionMaxTokens;
+    
     // For same-day bookings, adjust available slots calculation
     const availableSlots = isSameDay && pastSlotsCount > 0
-      ? Math.max(0, effectiveMaxTokens - Math.max(0, bookedSlots - pastSlotsCount))
-      : Math.max(0, session.maxTokens - bookedSlots);
+      ? Math.max(0, effectiveMaxTokensValue - Math.max(0, bookedSlots - pastSlotsCount))
+      : Math.max(0, sessionMaxTokens - bookedSlots);
     
     // CRITICAL: Calculate nextToken the same way as in booking flow
     // Use MAX token number (excluding cancelled) + 1, then skip cancelled tokens
@@ -513,12 +527,12 @@ const checkSlotAvailability = async (doctorId, date) => {
       const cancelledTokenNumbers = new Set(cancelledAppointments.map(apt => apt.tokenNumber));
       
       // Skip cancelled tokens
-      while (cancelledTokenNumbers.has(calculatedNextToken) && calculatedNextToken <= session.maxTokens) {
+      while (cancelledTokenNumbers.has(calculatedNextToken) && calculatedNextToken <= sessionMaxTokens) {
         calculatedNextToken++;
       }
       
       // Ensure we don't exceed maxTokens
-      if (calculatedNextToken <= session.maxTokens) {
+      if (calculatedNextToken <= sessionMaxTokens) {
         nextToken = calculatedNextToken;
       }
     }
@@ -538,21 +552,30 @@ const checkSlotAvailability = async (doctorId, date) => {
       nextToken,
       isSameDay,
       pastSlotsCount,
-      effectiveMaxTokens: isSameDay ? effectiveMaxTokens : session.maxTokens,
+      effectiveMaxTokens: effectiveMaxTokensValue,
       effectiveStartTime: isSameDay && pastSlotsCount > 0 ? effectiveStartTime : session.sessionStartTime,
       avgConsultationMinutes: avgConsultation,
-      calculation: `availableSlots = ${isSameDay && pastSlotsCount > 0 ? `Math.max(0, ${effectiveMaxTokens} - Math.max(0, ${bookedSlots} - ${pastSlotsCount}))` : `Math.max(0, ${session.maxTokens} - ${bookedSlots})`} = ${availableSlots}`,
+      calculation: `availableSlots = ${isSameDay && pastSlotsCount > 0 ? `Math.max(0, ${effectiveMaxTokensValue} - Math.max(0, ${bookedSlots} - ${pastSlotsCount}))` : `Math.max(0, ${sessionMaxTokens} - ${bookedSlots})`} = ${availableSlots}`,
     });
 
+    // Ensure sessionStartTime and sessionEndTime are always returned (even if undefined)
+    const finalSessionStartTime = isSameDay && pastSlotsCount > 0 
+      ? effectiveStartTime 
+      : (session.sessionStartTime || undefined);
+    const finalSessionEndTime = session.sessionEndTime || undefined;
+    const finalTotalSlots = isSameDay && pastSlotsCount > 0 
+      ? effectiveMaxTokensValue 
+      : sessionMaxTokens;
+    
     return {
       available: availableSlots > 0,
-      totalSlots: isSameDay && pastSlotsCount > 0 ? effectiveMaxTokens : session.maxTokens,
+      totalSlots: finalTotalSlots,
       bookedSlots,
       availableSlots,
       nextToken, // CRITICAL: Next token number that will be assigned (excluding cancelled tokens)
       sessionId: session._id,
-      sessionStartTime: isSameDay && pastSlotsCount > 0 ? effectiveStartTime : session.sessionStartTime,
-      sessionEndTime: session.sessionEndTime,
+      sessionStartTime: finalSessionStartTime,
+      sessionEndTime: finalSessionEndTime,
       avgConsultationMinutes: avgConsultation,
       isSameDay,
       pastSlotsCount,
