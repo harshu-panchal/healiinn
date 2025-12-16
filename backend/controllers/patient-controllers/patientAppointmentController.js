@@ -218,52 +218,7 @@ exports.createAppointment = asyncHandler(async (req, res) => {
   }
   parsedAppointmentDate.setHours(0, 0, 0, 0);
 
-  // Check slot availability before booking
-  const slotCheck = await checkSlotAvailability(doctorId, appointmentDate);
-  if (!slotCheck.available) {
-    return res.status(400).json({
-      success: false,
-      message:
-        slotCheck.message ||
-        "No available slots for this date. All slots are booked.",
-      data: {
-        totalSlots: slotCheck.totalSlots || 0,
-        bookedSlots: slotCheck.bookedSlots || 0,
-        availableSlots: 0,
-      },
-    });
-  }
-
-  // Check if there's a cancelled or completed session for this date before creating appointment
-  const sessionDateStart = new Date(parsedAppointmentDate);
-  sessionDateStart.setHours(0, 0, 0, 0);
-  const sessionDateEnd = new Date(parsedAppointmentDate);
-  sessionDateEnd.setHours(23, 59, 59, 999);
-
-  const { SESSION_STATUS } = require("../../utils/constants");
-  const cancelledOrCompletedSession = await Session.findOne({
-    doctorId,
-    date: { $gte: sessionDateStart, $lt: sessionDateEnd },
-    status: { $in: [SESSION_STATUS.CANCELLED, SESSION_STATUS.COMPLETED] },
-  });
-
-  if (cancelledOrCompletedSession) {
-    const isCancelled =
-      cancelledOrCompletedSession.status === SESSION_STATUS.CANCELLED;
-    const isCompleted =
-      cancelledOrCompletedSession.status === SESSION_STATUS.COMPLETED;
-
-    return res.status(400).json({
-      success: false,
-      message: isCancelled
-        ? "Session was cancelled for this date. Please select a different date."
-        : "Session has ended for this date. No new appointments can be booked.",
-      data: {
-        cancelledSessionDate: cancelledOrCompletedSession.date.toISOString().split("T")[0],
-        selectedDate: appointmentDate,
-      },
-    });
-  }
+  // No restrictions - allow booking on any date, day, and time
 
   // Get or create session automatically based on doctor's availability
   let session;
@@ -294,32 +249,7 @@ exports.createAppointment = asyncHandler(async (req, res) => {
     });
   }
 
-  // Check slot availability based on paid appointments with token numbers
-  // Count ALL appointments that have been assigned tokens (including called, in-consultation, completed, etc.)
-  // Token number will be assigned only after payment success
-  // IMPORTANT: Completed appointments also have token numbers, so they must be counted
-  // Only cancelled appointments should be excluded as they don't occupy token slots
-  const paidAppointmentsWithTokens = await Appointment.countDocuments({
-    sessionId: session._id,
-    paymentStatus: "paid", // Only count paid appointments
-    tokenNumber: { $ne: null }, // Only count appointments that have token numbers assigned
-    status: {
-      $ne: "cancelled", // Only exclude cancelled appointments (include completed, scheduled, called, in-consultation, etc.)
-    },
-  });
-
-  // Check if slots are available (based on paid appointments with tokens)
-  if (paidAppointmentsWithTokens >= session.maxTokens) {
-    return res.status(400).json({
-      success: false,
-      message: "No available slots for this session. All slots are booked.",
-      data: {
-        totalSlots: session.maxTokens,
-        bookedSlots: paidAppointmentsWithTokens,
-        availableSlots: 0,
-      },
-    });
-  }
+  // No slot restrictions - allow unlimited bookings
 
   // Calculate estimated time (will be recalculated after payment with actual token number)
   // For now, use a placeholder time
@@ -635,103 +565,9 @@ exports.rescheduleAppointment = asyncHandler(async (req, res) => {
   // If appointment is cancelled, we'll update it to rescheduled status
   const isCancelled = appointment.status === "cancelled";
 
-  // If rescheduling a cancelled appointment, check if the new date is the same as the cancelled session date
-  if (isCancelled && appointment.sessionId) {
-    // Session is already imported at the top
-    const cancelledSession = await Session.findById(appointment.sessionId);
+  // No restrictions - allow rescheduling to any date, including cancelled session dates
 
-    if (cancelledSession && cancelledSession.status === "cancelled") {
-      // Get the cancelled session date
-      const cancelledSessionDate = new Date(cancelledSession.date);
-      cancelledSessionDate.setHours(0, 0, 0, 0);
-
-      // Parse the new appointment date
-      let parsedNewDate;
-      if (
-        typeof appointmentDate === "string" &&
-        appointmentDate.match(/^\d{4}-\d{2}-\d{2}$/)
-      ) {
-        const [year, month, day] = appointmentDate.split("-").map(Number);
-        parsedNewDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-      } else {
-        parsedNewDate = new Date(appointmentDate);
-      }
-      parsedNewDate.setHours(0, 0, 0, 0);
-
-      // Check if new date matches cancelled session date
-      if (cancelledSessionDate.getTime() === parsedNewDate.getTime()) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Cannot reschedule to the same date when the session was cancelled. Please select a different date.",
-          data: {
-            cancelledSessionDate: cancelledSessionDate
-              .toISOString()
-              .split("T")[0],
-            selectedDate: appointmentDate,
-          },
-        });
-      }
-    }
-  }
-
-  // Check if new date has available slots (this also checks for cancelled sessions)
-  const slotCheck = await checkSlotAvailability(
-    appointment.doctorId,
-    appointmentDate
-  );
-  if (!slotCheck.available) {
-    return res.status(400).json({
-      success: false,
-      message: slotCheck.message || "No available slots for the new date",
-      data: {
-        totalSlots: slotCheck.totalSlots || 0,
-        bookedSlots: slotCheck.bookedSlots || 0,
-        availableSlots: 0,
-        isCancelled: slotCheck.isCancelled || false,
-      },
-    });
-  }
-
-  // Additional check: Ensure no cancelled session exists for the new date
-  // (checkSlotAvailability already does this, but double-check for safety)
-  let parsedNewDate;
-  if (
-    typeof appointmentDate === "string" &&
-    appointmentDate.match(/^\d{4}-\d{2}-\d{2}$/)
-  ) {
-    const [year, month, day] = appointmentDate.split("-").map(Number);
-    parsedNewDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-  } else {
-    parsedNewDate = new Date(appointmentDate);
-  }
-  parsedNewDate.setHours(0, 0, 0, 0);
-
-  const sessionDateStart = new Date(parsedNewDate);
-  sessionDateStart.setHours(0, 0, 0, 0);
-  const sessionDateEnd = new Date(parsedNewDate);
-  sessionDateEnd.setHours(23, 59, 59, 999);
-
-  // Check if there's a cancelled session for the new date
-  const cancelledSessionForNewDate = await Session.findOne({
-    doctorId: appointment.doctorId,
-    date: { $gte: sessionDateStart, $lt: sessionDateEnd },
-    status: "cancelled",
-  });
-
-  if (cancelledSessionForNewDate) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Session was cancelled for this date. Please select a different date.",
-      data: {
-        cancelledSessionDate: cancelledSessionForNewDate.date
-          .toISOString()
-          .split("T")[0],
-        selectedDate: appointmentDate,
-      },
-    });
-  }
+  // No restrictions - allow rescheduling to any date
 
   let newSession;
   try {
@@ -746,29 +582,7 @@ exports.rescheduleAppointment = asyncHandler(async (req, res) => {
     });
   }
 
-  // Check if new session has available slots - count appointments with token numbers
-  // IMPORTANT: Completed appointments also have token numbers, so they must be counted
-  // Only cancelled appointments should be excluded as they don't occupy token slots
-  const paidAppointmentsWithTokensCount = await Appointment.countDocuments({
-    sessionId: newSession._id,
-    paymentStatus: "paid", // Only count paid appointments
-    tokenNumber: { $ne: null }, // Only count appointments that have token numbers assigned
-    status: {
-      $ne: "cancelled", // Only exclude cancelled appointments (include completed, scheduled, called, in-consultation, etc.)
-    },
-  });
-
-  if (paidAppointmentsWithTokensCount >= newSession.maxTokens) {
-    return res.status(400).json({
-      success: false,
-      message: "No available slots for the new date. All slots are booked.",
-      data: {
-        totalSlots: newSession.maxTokens,
-        bookedSlots: paidAppointmentsWithTokensCount,
-        availableSlots: 0,
-      },
-    });
-  }
+  // No slot restrictions - allow unlimited bookings
 
   // Store old appointment data for cancellation
   const oldAppointmentDate = appointment.appointmentDate;
@@ -1435,48 +1249,8 @@ exports.verifyAppointmentPayment = asyncHandler(async (req, res) => {
     );
   }
 
-  // Check if token exceeds max tokens
-  if (newTokenNumber > session.maxTokens) {
-    // Create failed transaction record
-    await Transaction.create({
-      userId: id,
-      userType: "patient",
-      type: "payment",
-      amount: appointment.fee,
-      status: "failed",
-      description: `Appointment payment failed - No available slots for appointment ${appointment._id}`,
-      referenceId: appointment._id.toString(),
-      category: "appointment",
-      paymentMethod: paymentMethod || "razorpay",
-      paymentId: paymentId,
-      appointmentId: appointment._id,
-      metadata: {
-        orderId: orderId,
-        error: "No available slots",
-        maxTokens: session.maxTokens,
-        requestedToken: newTokenNumber,
-      },
-    });
-
-    // Cancel appointment and refund
-    appointment.status = "cancelled";
-    appointment.cancelledBy = "system";
-    appointment.cancellationReason =
-      "Payment successful but no available slots";
-    await appointment.save();
-
-    // Remove from session
-    session.appointments = session.appointments.filter(
-      (apptId) => apptId.toString() !== appointment._id.toString()
-    );
-    await session.save();
-
-    return res.status(400).json({
-      success: false,
-      message:
-        "Payment successful but no available slots. Appointment cancelled and refund will be processed.",
-    });
-  }
+  // No token limit restrictions - allow unlimited tokens
+  // If token exceeds maxTokens, just assign it anyway (no restrictions)
 
   // Get doctor data (needed for both time calculation and wallet credit)
   const doctor = await Doctor.findById(appointment.doctorId);
