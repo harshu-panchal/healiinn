@@ -259,7 +259,7 @@ exports.createAppointment = asyncHandler(async (req, res) => {
         ? "Session was cancelled for this date. Please select a different date."
         : "Session has ended for this date. No new appointments can be booked.",
       data: {
-        cancelledSessionDate: cancelledSession.date.toISOString().split("T")[0],
+        cancelledSessionDate: cancelledOrCompletedSession.date.toISOString().split("T")[0],
         selectedDate: appointmentDate,
       },
     });
