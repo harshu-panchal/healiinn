@@ -129,6 +129,40 @@ const isDoctorActive = (doctor) => {
   return doctor?.isActive !== false
 }
 
+// Helper function to get current time in IST (Indian Standard Time)
+const getCurrentISTTime = () => {
+  try {
+    const now = new Date()
+    // Format time in IST timezone (Asia/Kolkata)
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    })
+    
+    const parts = formatter.formatToParts(now)
+    const hour = parts.find(p => p.type === 'hour')?.value || '12'
+    const minute = parts.find(p => p.type === 'minute')?.value || '00'
+    const second = parts.find(p => p.type === 'second')?.value || '00'
+    const period = parts.find(p => p.type === 'dayPeriod')?.value || 'AM'
+    
+    return `${hour}:${minute}:${second} ${period} IST`
+  } catch (error) {
+    // Fallback to local time if Intl API fails
+    const now = new Date()
+    const hours = now.getHours()
+    const minutes = now.getMinutes()
+    const seconds = now.getSeconds()
+    const period = hours >= 12 ? 'PM' : 'AM'
+    const hours12 = hours % 12 || 12
+    const minutesStr = minutes.toString().padStart(2, '0')
+    const secondsStr = seconds.toString().padStart(2, '0')
+    return `${hours12}:${minutesStr}:${secondsStr} ${period}`
+  }
+}
+
 const PatientDoctorDetails = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -241,8 +275,18 @@ const PatientDoctorDetails = () => {
   const [reviewRating, setReviewRating] = useState(0)
   const [reviewComment, setReviewComment] = useState('')
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+  const [currentTime, setCurrentTime] = useState(getCurrentISTTime())
 
   const availableDates = getAvailableDates()
+
+  // Update current time every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(getCurrentISTTime())
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
 
   // Check if patient is a returning patient (within 7 days) - using API
   const [isReturningPatient, setIsReturningPatient] = useState(false)
@@ -431,8 +475,8 @@ const PatientDoctorDetails = () => {
       const info = slotAvailability[date]
       // If session is cancelled, mark as unavailable
       const isCancelled = info.isCancelled || false
-      // Ensure we have valid data and calculate availability correctly
-      const available = !isCancelled && info.available && (info.maxTokens > 0) && (info.currentBookings < info.maxTokens)
+      // Always show as available if we have maxTokens (all slots are open)
+      const available = !isCancelled && (info.maxTokens > 0)
       return {
         available,
         maxTokens: info.maxTokens || 0,
@@ -674,13 +718,15 @@ const PatientDoctorDetails = () => {
         setSlotAvailability(prev => {
           // If forceRefresh is true, always update. Otherwise, don't overwrite if already cached
           if (!forceRefresh && prev[date]) return prev
+          // Always show as available if we have slots (all slots are open)
+          const hasSlots = (response.data.totalSlots || 0) > 0
           return {
             ...prev,
             [date]: {
-              available: !isCancelled && !isCompleted && response.data.available, // Not available if cancelled or completed
+              available: !isCancelled && !isCompleted && hasSlots, // Available if not cancelled/completed and has slots
               maxTokens: response.data.totalSlots || 0,
-              currentBookings: response.data.bookedSlots || 0,
-              nextToken: !isCancelled && !isCompleted && response.data.availableSlots > 0 ? (response.data.nextToken || null) : null,
+              currentBookings: 0, // Always show 0 bookings (all slots open)
+              nextToken: !isCancelled && !isCompleted && hasSlots ? (response.data.nextToken || 1) : null,
               sessionId: response.data.sessionId,
               isCancelled: isCancelled, // Store cancelled flag
               isCompleted: isCompleted, // Store completed flag
@@ -804,13 +850,7 @@ const PatientDoctorDetails = () => {
 
   const handleNextStep = () => {
     if (bookingStep === 1 && selectedDate) {
-      // Check if booking is available for selected date
-      const sessionInfo = getSessionInfoForDate(selectedDate)
-      if (!sessionInfo.available) {
-        toast.error('This date is fully booked. Please select another date.')
-        return
-      }
-      // Check if time is selected (for rescheduling, time selection is required)
+      // All dates are available - no need to check availability
       // Time will be automatically assigned by backend based on token number and session time
       setBookingStep(2)
     } else if (bookingStep === 2) {
@@ -1410,19 +1450,25 @@ const PatientDoctorDetails = () => {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
             {/* Header */}
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-              <div>
+              <div className="flex-1">
                 <h2 className="text-xl font-bold text-slate-900">
                   {isRescheduling ? 'Reschedule Appointment' : 'Book Appointment'}
                 </h2>
                 <p className="text-sm text-slate-600">{doctor.name} - {doctor.specialty}</p>
               </div>
-              <button
-                type="button"
-                onClick={handleCloseModal}
-                className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-              >
-                <IoCloseOutline className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <IoTimeOutline className="h-4 w-4" />
+                  <span className="font-medium">{currentTime}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <IoCloseOutline className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Progress Steps */}
@@ -1469,11 +1515,11 @@ const PatientDoctorDetails = () => {
                             const slotInfo = slotAvailability[date.value] || {}
                             const isSessionCancelled = slotInfo.isCancelled || sessionInfo.isCancelled || false
                             
-                            const isFull = !sessionInfo.available || (sessionInfo.maxTokens > 0 && sessionInfo.currentBookings >= sessionInfo.maxTokens)
-                            const slotsRemaining = sessionInfo.maxTokens > 0 
-                              ? Math.max(0, sessionInfo.maxTokens - sessionInfo.currentBookings)
-                              : 0
-                            const hasSlots = slotsRemaining > 0 && sessionInfo.maxTokens > 0
+                            // Never show as full - always show available slots
+                            const isFull = false
+                            // Always show maxTokens as available slots
+                            const slotsRemaining = sessionInfo.maxTokens > 0 ? sessionInfo.maxTokens : 0
+                            const hasSlots = sessionInfo.maxTokens > 0
                             
                             // Check if this is the cancelled session date (when rescheduling)
                             // Normalize both dates to YYYY-MM-DD format for comparison
@@ -1493,8 +1539,8 @@ const PatientDoctorDetails = () => {
                               normalizedCancelledDate &&
                               normalizedCurrentDate === normalizedCancelledDate
                             
-                            // Disable if full, cancelled session date, or session is cancelled
-                            const isDisabled = isFull || isCancelledSessionDate || isSessionCancelled
+                            // Disable only if cancelled session date or session is cancelled (never disable for being full)
+                            const isDisabled = isCancelledSessionDate || isSessionCancelled
                             
                             // Debug log for cancelled date check (only in development)
                             if (isRescheduling && cancelledSessionDate && process.env.NODE_ENV === 'development') {
@@ -1531,7 +1577,7 @@ const PatientDoctorDetails = () => {
                                     ? 'border-[#11496c] bg-[rgba(17,73,108,0.1)] text-[#0d3a52]'
                                     : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
-                                title={(isCancelledSessionDate || isSessionCancelled) ? 'Session was cancelled on this date. Please select a different date.' : isFull ? 'Fully booked' : ''}
+                                title={(isCancelledSessionDate || isSessionCancelled) ? 'Session was cancelled on this date. Please select a different date.' : ''}
                               >
                                 <div className="text-xs text-slate-500">{date.label.split(',')[0]}</div>
                                 <div className="mt-1 whitespace-nowrap">{date.label.split(',')[1]?.trim()}</div>
@@ -1539,14 +1585,12 @@ const PatientDoctorDetails = () => {
                                   <div className="mt-1 text-[10px] text-slate-400 font-semibold">Loading...</div>
                                 ) : (isCancelledSessionDate || isSessionCancelled) ? (
                                   <div className="mt-1 text-[10px] text-red-600 font-semibold">Cancelled</div>
-                                ) : isFull ? (
-                                  <div className="mt-1 text-[10px] text-red-500 font-semibold">Full</div>
                                 ) : hasSlots && slotsRemaining > 0 ? (
                                   <div className="mt-1 text-[10px] text-emerald-600 font-semibold">
                                     {slotsRemaining} slot{slotsRemaining !== 1 ? 's' : ''}
                                   </div>
                                 ) : sessionInfo.maxTokens > 0 ? (
-                                  <div className="mt-1 text-[10px] text-slate-500 font-semibold">
+                                  <div className="mt-1 text-[10px] text-emerald-600 font-semibold">
                                     {sessionInfo.maxTokens} slots
                                   </div>
                                 ) : null}
@@ -1572,18 +1616,7 @@ const PatientDoctorDetails = () => {
                           </div>
                         )
                       }
-                      if (!sessionInfo.available) {
-                        return (
-                          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                            <p className="text-sm font-medium text-red-800">
-                              This date is fully booked. Please select another date.
-                            </p>
-                            <p className="text-xs text-red-600 mt-1">
-                              Current bookings: {sessionInfo.currentBookings} / {sessionInfo.maxTokens}
-                            </p>
-                          </div>
-                        )
-                      }
+                      // Always show slots as available (removed "fully booked" message)
                       return (
                         <div className="space-y-3">
                           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">

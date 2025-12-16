@@ -54,9 +54,19 @@ const timeToMinutes = (timeString) => {
 
 /**
  * Calculate minutes between two time strings
+ * Handles overnight sessions (e.g., 10:00 PM to 4:00 AM)
  */
 const getTimeDifference = (startTime, endTime) => {
-  return timeToMinutes(endTime) - timeToMinutes(startTime);
+  const startMinutes = timeToMinutes(startTime);
+  const endMinutes = timeToMinutes(endTime);
+  
+  // If end time is less than start time, it's an overnight session
+  // Add 24 hours (1440 minutes) to the end time
+  if (endMinutes < startMinutes) {
+    return (endMinutes + 1440) - startMinutes; // 1440 minutes = 24 hours
+  }
+  
+  return endMinutes - startMinutes;
 };
 
 /**
