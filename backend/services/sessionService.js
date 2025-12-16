@@ -148,12 +148,7 @@ const getOrCreateSession = async (doctorId, date) => {
     date: { $gte: sessionDate, $lt: sessionEndDate },
   });
 
-  // If session exists and is cancelled, throw error (don't allow booking on cancelled session)
-  if (session && session.status === SESSION_STATUS.CANCELLED) {
-    throw new Error('Session was cancelled for this date. Please select a different date.');
-  }
-
-  // If session exists, return it
+  // If session exists, return it (no restrictions - allow booking on any session)
   if (session) {
     // Ensure session has required fields, set defaults if missing
     if (!session.sessionStartTime || !session.sessionEndTime) {
@@ -164,10 +159,7 @@ const getOrCreateSession = async (doctorId, date) => {
     return session;
   }
 
-  // Check if date is blocked
-  if (isDateBlocked(doctor, sessionDate)) {
-    throw new Error('Doctor has blocked this date');
-  }
+  // No restrictions - allow booking on any date
 
   // Use default values for new sessions
   // Default: 9:00 AM to 5:00 PM (8 hours = 480 minutes)
@@ -180,9 +172,9 @@ const getOrCreateSession = async (doctorId, date) => {
   }
 
   // Calculate max tokens: default 8 hours (480 minutes) / avg consultation time
-  // Minimum 50 slots to ensure availability
+  // Use a very high number to allow unlimited bookings (1000 slots)
   const defaultDuration = 480; // 8 hours in minutes
-  const calculatedMaxTokens = Math.max(50, Math.floor(defaultDuration / avgConsultation));
+  const calculatedMaxTokens = Math.max(1000, Math.floor(defaultDuration / avgConsultation));
 
   console.log(`🆕 Creating new session for ${sessionDate.toISOString().split('T')[0]}:`, {
     doctorId,
@@ -255,30 +247,7 @@ const checkSlotAvailability = async (doctorId, date) => {
       parsedDate.setHours(0, 0, 0, 0);
     }
     
-    const sessionDateStart = new Date(parsedDate);
-    sessionDateStart.setHours(0, 0, 0, 0);
-    const sessionDateEnd = new Date(parsedDate);
-    sessionDateEnd.setHours(23, 59, 59, 999);
-    
-    // Check if there's a cancelled session for this date
-    const cancelledSession = await Session.findOne({
-      doctorId,
-      date: { $gte: sessionDateStart, $lt: sessionDateEnd },
-      status: SESSION_STATUS.CANCELLED,
-    });
-    
-    if (cancelledSession) {
-      return {
-        available: false,
-        message: 'Session was cancelled for this date. Please select a different date.',
-        totalSlots: cancelledSession.maxTokens || 0,
-        bookedSlots: 0,
-        availableSlots: 0,
-        isCancelled: true,
-      };
-    }
-
-    // Get or create session for this date
+    // Get or create session for this date (no restrictions - all dates are available)
     const session = await getOrCreateSession(doctorId, date);
     const avgConsultation = doctor.averageConsultationMinutes || 20;
     

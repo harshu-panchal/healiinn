@@ -4,8 +4,8 @@
   "description": "Backend API for Healiinn healthcare platform",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node api.js && node server.js",
+    "dev": "node api.js && nodemon server.js",
     "test:apis": "node scripts/apiSmokeTest.js",
     "test:all": "node scripts/testAllAPIs.js",
     "test:razorpay": "node scripts/testRazorpay.js",
